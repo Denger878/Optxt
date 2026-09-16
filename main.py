@@ -32,9 +32,13 @@ def main():
     print("=" * 50)
 
     last_announcement_time = 0.0
-    last_spoken = ""
     show_skeleton = True
     frame_times = deque(maxlen=30)
+
+    # Everything the app has said this session, stamped from launch. The HUD
+    # shows the tail of it as a transcript.
+    session_start = time.time()
+    transcript = deque(maxlen=12)
 
     while True:
         loop_start = time.time()
@@ -62,7 +66,7 @@ def main():
                 if changed:
                     print(f">>> {message}")
                     say_interaction(message)
-                    last_spoken = message
+                    transcript.append((now - session_start, message))
                     last_announcement_time = now
             else:
                 # Keep feeding the stability window even during the cooldown,
@@ -81,7 +85,8 @@ def main():
             gesture, gesture_conf,
             emotion, emotion_conf,
             fps,
-            ("[muted] " if is_muted() else "") + last_spoken,
+            transcript,
+            muted=is_muted(),
         )
 
         cv2.imshow("OPTXT", display_frame)

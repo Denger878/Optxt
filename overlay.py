@@ -5,9 +5,13 @@ Drawing layer for the live view.
 Kept separate from main.py so the app loop stays readable, and separate from
 landmarks.py so nothing about how it looks can affect what the models see.
 
-Text is rendered with Pillow using a real system typeface. OpenCV's built-in
-putText only has the Hershey vector fonts, which are single-weight, badly
-spaced and the reason the old HUD looked like a school science project.
+The look is editorial rather than sci-fi: warm off-white cards, hairline rules,
+a serif for the readings and a monospace for the running transcript. Georgia and
+Courier New stand in for Crimson Text and Courier Prime - the same fallbacks the
+web version declares, and the only ones guaranteed to exist locally.
+
+Text is rendered with Pillow. OpenCV's putText only has the Hershey vector
+fonts, which are single-weight and badly spaced.
 """
 import cv2
 import numpy as np
@@ -18,31 +22,45 @@ mp_drawing = mp.solutions.drawing_utils
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 
-# ---- palette (RGB). Deliberately plain: white text, grey labels, one accent.
-INK = (255, 255, 255)
-MUTED = (178, 178, 184)
-FAINT = (138, 138, 144)
-ACCENT = (90, 175, 255)
-PANEL_FILL = (14, 14, 16)
+# ---- palette (RGB)
+OFF_WHITE = (247, 246, 243)
+INK = (26, 26, 26)
+INK_BODY = (46, 46, 46)
+INK_LIGHT = (102, 102, 102)
+BORDER = (226, 221, 216)
+RED = (218, 41, 28)
 
 # ---- skeleton colours (BGR; these go through OpenCV)
-MESH_LINE = (150, 120, 85)
-POSE_LINE = (150, 190, 150)
-HAND_LINE = (200, 150, 235)
+MESH_LINE = (205, 205, 200)
+POSE_LINE = (225, 225, 220)
+HAND_LINE = (28, 41, 218)          # the accent red
 
-FONTS = "/System/Library/Fonts/HelveticaNeue.ttc"
-_WEIGHTS = {"regular": 0, "bold": 1}
+SERIF = "/System/Library/Fonts/Supplemental/Georgia.ttf"
+SERIF_ITALIC = "/System/Library/Fonts/Supplemental/Georgia Italic.ttf"
+MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
+MONO_BOLD = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
+
+_FACES = {"serif": SERIF, "italic": SERIF_ITALIC, "mono": MONO, "mono_bold": MONO_BOLD}
 _font_cache = {}
 
 
-def _font(size, weight="regular"):
-    key = (size, weight)
+def _font(size, face="serif"):
+    key = (size, face)
     if key not in _font_cache:
         try:
-            _font_cache[key] = ImageFont.truetype(FONTS, size, index=_WEIGHTS[weight])
+            _font_cache[key] = ImageFont.truetype(_FACES[face], size)
         except Exception:
             _font_cache[key] = ImageFont.load_default()
     return _font_cache[key]
+
+
+def _tracked(draw, xy, text, font, fill, tracking):
+    """Letter-spaced text. Pillow has no tracking control, so draw per glyph."""
+    x, y = xy
+    for char in text:
+        draw.text((x, y), char, font=font, fill=fill)
+        x += draw.textlength(char, font=font) + tracking
+    return x - xy[0]
 
 
 POSE_BONES = [
@@ -70,10 +88,9 @@ def draw_skeleton(frame, landmarks, raw):
     layer = np.zeros_like(frame)
 
     if face_results.multi_face_landmarks:
-        face = face_results.multi_face_landmarks[0]
         mp_drawing.draw_landmarks(
             image=layer,
-            landmark_list=face,
+            landmark_list=face_results.multi_face_landmarks[0],
             connections=mp_face_mesh.FACEMESH_CONTOURS,
             landmark_drawing_spec=None,
             connection_drawing_spec=mp_drawing.DrawingSpec(color=MESH_LINE, thickness=1),
@@ -83,7 +100,7 @@ def draw_skeleton(frame, landmarks, raw):
         pose = landmarks['pose']
         for a, b in POSE_BONES:
             cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h),
-                     POSE_LINE, 2, cv2.LINE_AA)
+                     POSE_LINE, 1, cv2.LINE_AA)
         for key in pose:
             cv2.circle(layer, _px(pose[key], w, h), 3, POSE_LINE, -1, cv2.LINE_AA)
 
@@ -99,99 +116,137 @@ def draw_skeleton(frame, landmarks, raw):
                     color=HAND_LINE, thickness=1),
             )
 
-    # Blend rather than paste, so the wireframe sits over the video at partial
-    # strength instead of stamping hard lines on top of it.
-    return cv2.addWeighted(frame, 1.0, layer, 0.55, 0)
+    return cv2.addWeighted(frame, 1.0, layer, 0.5, 0)
 
 
-def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf, fps, last_spoken):
+def _card(draw, box, radius, opacity=238):
+    """Warm off-white card with a hairline border."""
+    draw.rounded_rectangle(box, radius=radius, fill=OFF_WHITE + (opacity,))
+    draw.rounded_rectangle(box, radius=radius, outline=BORDER + (255,), width=1)
+
+
+def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
+             fps, transcript, muted=False):
     """
-    Status panel: what's detected, how sure the models are, what was last said.
+    Two cards: the current reading, and a running transcript of what was said.
 
-    Every size and position is derived from the frame dimensions rather than
-    hard-coded, so the layout holds together at any resolution or aspect ratio.
-    A fixed-pixel HUD laid out for 640x480 turns into unreadable specks on a
-    1080p or portrait-phone frame.
+    `transcript` is a sequence of (elapsed_seconds, sentence), oldest first.
+    The transcript exists because this tool narrates out loud - showing the same
+    lines on screen makes it legible to someone watching over your shoulder, and
+    makes a demo recording self-explanatory.
+
+    Every size derives from the frame height rather than being hard-coded, so
+    the layout holds at any resolution or aspect ratio.
     """
     h, w = frame.shape[:2]
-    s = h / 480.0                      # scale factor; 480p is the reference
+    s = h / 480.0
 
-    def sz(value):
-        return max(1, int(round(value * s)))
+    def sz(v):
+        return max(1, int(round(v * s)))
 
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
 
-    pad = sz(22)
+    # ── reading card ───────────────────────────────────────────────
+    pad = sz(20)
     px, py = sz(24), sz(24)
-    pw = min(sz(330), int(w * 0.55))
-    label_f = _font(sz(15), "bold")
-    value_f = _font(sz(30), "regular")
-    small_f = _font(sz(15), "regular")
+    pw = min(sz(320), int(w * 0.52))
+    inner = pw - pad * 2
+    x = px + pad
 
-    row_h = sz(30) + sz(15) + sz(30)   # label + value + bar block
-    ph = pad * 2 + row_h * 2 + sz(18)
+    wordmark_f = _font(sz(23), "italic")
+    micro_f = _font(sz(10), "mono")
+    value_f = _font(sz(29), "serif")
+    meta_f = _font(sz(11), "mono")
 
-    draw.rounded_rectangle([px, py, px + pw, py + ph], radius=sz(12),
-                           fill=PANEL_FILL + (205,))
+    rows = [("GESTURE", gesture, gesture_conf), ("EMOTION", emotion, emotion_conf)]
+    row_h = sz(14) + sz(44) + sz(14)
+    ph = pad + sz(30) + sz(16) + row_h * len(rows) + pad - sz(6)
+
+    _card(draw, [px, py, px + pw, py + ph], sz(12))
+
+    y = py + pad - sz(4)
+    draw.text((x, y), "Optxt", font=wordmark_f, fill=INK + (255,))
+
+    fps_text = f"{fps:.0f} fps"
+    draw.text((px + pw - pad - draw.textlength(fps_text, font=meta_f), y + sz(10)),
+              fps_text, font=meta_f, fill=INK_LIGHT + (255,))
+
+    y += sz(32)
+    draw.line([x, y, x + inner, y], fill=BORDER + (255,), width=1)
+    y += sz(14)
 
     placeholder = {"no_data", "no_model", "unsure", "no_face"}
-    rows = [("GESTURE", gesture, gesture_conf),
-            ("EMOTION", emotion, emotion_conf)]
-
-    x = px + pad
-    y = py + pad
-    inner = pw - pad * 2
 
     for title, label, conf in rows:
         text = str(label).replace("_", " ")
-        colour = INK if label not in placeholder else FAINT
+        strong = label not in placeholder
+        colour = INK if strong else INK_LIGHT
 
-        draw.text((x, y), title, font=label_f, fill=MUTED + (255,))
+        _tracked(draw, (x, y), title, micro_f, INK_LIGHT + (255,), sz(1.4))
 
         pct = f"{conf * 100:.0f}%"
-        draw.text((x + inner - draw.textlength(pct, font=small_f), y + sz(1)),
-                  pct, font=small_f, fill=MUTED + (255,))
+        draw.text((px + pw - pad - draw.textlength(pct, font=meta_f), y - sz(1)),
+                  pct, font=meta_f, fill=INK_LIGHT + (255,))
 
-        draw.text((x, y + sz(21)), text, font=value_f, fill=colour + (255,))
+        draw.text((x, y + sz(13)), text, font=value_f, fill=colour + (255,))
 
-        bar_y = y + sz(21) + sz(36)
-        bar_h = sz(5)
+        bar_y = y + sz(13) + sz(46)
+        bar_h = sz(3)
         draw.rounded_rectangle([x, bar_y, x + inner, bar_y + bar_h],
-                               radius=bar_h // 2, fill=(52, 52, 58, 255))
+                               radius=bar_h // 2, fill=BORDER + (255,))
         filled = int(inner * max(0.0, min(1.0, conf)))
         if filled > bar_h:
             draw.rounded_rectangle([x, bar_y, x + filled, bar_y + bar_h],
                                    radius=bar_h // 2,
-                                   fill=(ACCENT if colour is INK else FAINT) + (255,))
+                                   fill=(RED if strong else INK_LIGHT) + (255,))
+        y += row_h
 
-        y += row_h + sz(18)
+    # ── transcript card ────────────────────────────────────────────
+    line_f = _font(sz(13), "mono")
+    time_f = _font(sz(13), "mono_bold")
+    lines = list(transcript)[-3:]
+    line_h = sz(19)
 
-    # FPS, bottom-right corner of the panel, small and out of the way.
-    fps_text = f"{fps:.0f} FPS"
-    draw.text((px + pw - pad - draw.textlength(fps_text, font=small_f),
-               py + ph - pad - sz(6)),
-              fps_text, font=small_f, fill=FAINT + (255,))
+    tpad = sz(16)
+    th = tpad + sz(14) + sz(8) + line_h * max(len(lines), 1) + tpad - sz(6)
+    tx0, tx1 = sz(24), w - sz(24)
+    ty0 = h - sz(24) - th
 
-    # Key hints - large enough to actually read. These were 10px grey before,
-    # which made them effectively invisible.
-    def pill(x, y, text, font, colour):
-        tw = draw.textlength(text, font=font)
-        draw.rounded_rectangle([x - sz(14), y - sz(9), x + tw + sz(14), y + sz(27)],
-                               radius=sz(10), fill=PANEL_FILL + (200,))
-        draw.text((x, y), text, font=font, fill=colour + (255,))
-        return tw
+    _card(draw, [tx0, ty0, tx1, ty0 + th], sz(12))
 
-    hint_f = _font(sz(17), "regular")
-    pill(px + sz(14), h - sz(46), "Q  quit       M  mute       S  wireframe",
-         hint_f, MUTED)
+    ty = ty0 + tpad - sz(2)
+    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, INK_LIGHT + (255,), sz(1.4))
 
-    # Caption sits on its own line ABOVE the hints so the two can never collide.
-    if last_spoken:
-        cap_f = _font(sz(19), "regular")
-        text = last_spoken if len(last_spoken) < 70 else last_spoken[:67] + "..."
-        tw = draw.textlength(text, font=cap_f)
-        pill(max(sz(38), (w - tw) / 2), h - sz(100), text, cap_f, INK)
+    hint = "Q quit   M mute   S wireframe"
+    if muted:
+        hint = "MUTED   " + hint
+    draw.text((tx1 - tpad - draw.textlength(hint, font=micro_f), ty),
+              hint, font=micro_f, fill=INK_LIGHT + (255,))
+
+    ty += sz(18)
+    draw.line([tx0 + tpad, ty, tx1 - tpad, ty], fill=BORDER + (255,), width=1)
+    ty += sz(8)
+
+    if not lines:
+        draw.text((tx0 + tpad, ty), "listening...", font=line_f,
+                  fill=INK_LIGHT + (255,))
+    else:
+        # Older lines fade back so the newest reads first.
+        for i, (elapsed, sentence) in enumerate(lines):
+            newest = i == len(lines) - 1
+            colour = INK if newest else INK_LIGHT
+            stamp = f"{int(elapsed) // 60:02d}:{int(elapsed) % 60:02d}"
+            draw.text((tx0 + tpad, ty), stamp, font=time_f,
+                      fill=(RED if newest else INK_LIGHT) + (255,))
+            offset = draw.textlength("00:00  ", font=time_f)
+            avail = (tx1 - tpad) - (tx0 + tpad + offset)
+            text = sentence
+            while draw.textlength(text, font=line_f) > avail and len(text) > 4:
+                text = text[:-2]
+            draw.text((tx0 + tpad + offset, ty), text, font=line_f,
+                      fill=colour + (255,))
+            ty += line_h
 
     rgba = np.array(layer)
     alpha = rgba[:, :, 3:4].astype(np.float32) / 255.0
