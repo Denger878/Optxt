@@ -1,0 +1,3 @@
+# Dev-only files; no reason to serve them from the CDN.
+verify_pipeline.mjs
+README.md
