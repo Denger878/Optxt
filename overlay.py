@@ -21,18 +21,19 @@ mp_hands = mp.solutions.hands
 # ---- palette (RGB)
 # White carries everything inside a plate - text, rules, meters - with secondary
 # text the same white at lower opacity rather than a grey, so nothing is a
-# near-miss of anything else. Blue is only ever the plate outline. Amber appears
-# for one thing, muting.
+# near-miss of anything else. Blue and red are only ever plate outlines. Amber
+# appears for one thing, muting.
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
+RED = (255, 0, 0)
 AMBER = (255, 170, 40)
 
 # ---- wireframe colours (BGR; these go through OpenCV)
 # One colour per landmark group, kept to primaries so no two can be mistaken
 # for each other at a glance.
-FACE_WIRE = (255, 0, 0)            # blue
+FACE_WIRE = (0, 255, 0)            # green
 POSE_WIRE = (0, 0, 255)            # red
-HAND_WIRE = (0, 255, 0)            # green
+HAND_WIRE = (255, 0, 0)            # blue
 
 MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
 MONO_BOLD = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
@@ -86,7 +87,7 @@ def _node(layer, centre, colour, r):
 def draw_skeleton(frame, landmarks, raw):
     """
     Wireframe: hard lines with a visible node at every vertex, one primary
-    colour per group - face blue, body red, hands green.
+    colour per group - face green, shoulders red, hands blue.
 
     Drawn without anti-aliasing and with square nodes on purpose. Smooth
     contours look like a drawing of a face; stepped lines with marked vertices
@@ -132,7 +133,7 @@ def draw_skeleton(frame, landmarks, raw):
     return cv2.addWeighted(frame, 1.0, layer, 0.85, 0)
 
 
-def _plate(draw, box, opacity=178, width=2):
+def _plate(draw, box, outline=BLUE, opacity=178, width=2):
     """
     Black translucent plate with a single uniform border.
 
@@ -141,7 +142,7 @@ def _plate(draw, box, opacity=178, width=2):
     against a moving video feed.
     """
     draw.rectangle(box, fill=(0, 0, 0, opacity))
-    draw.rectangle(box, outline=BLUE + (255,), width=width)
+    draw.rectangle(box, outline=outline + (255,), width=width)
 
 
 def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
@@ -189,7 +190,7 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     row_h = sz(10) + sz(28) + sz(10)
     ph = pad * 2 + row_h * len(rows) - sz(8)
 
-    _plate(draw, [px, py, px + pw, py + ph])
+    _plate(draw, [px, py, px + pw, py + ph], outline=RED)
 
     placeholder = {"no_data", "no_model", "unsure", "no_face"}
     y = py + pad
