@@ -313,7 +313,7 @@ async function init() {
 
 startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
-  startBtn.textContent = 'REQUESTING CAMERA…';
+  startBtn.textContent = 'REQUESTING CAMERA...';
   try {
     video.srcObject = await navigator.mediaDevices.getUserMedia({
       video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },

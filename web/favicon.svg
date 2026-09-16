@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Sunglasses">
+  <!-- The icon carries its own light backdrop. Without it the near-black brow
+       bar vanished against dark browser tabs and the glasses read as two
+       floating blue squares. -->
+  <rect width="64" height="64" rx="14" fill="#f4f4f6"/>
+  <rect x="7" y="22" width="50" height="6" rx="3" fill="#101018"/>
+  <rect x="29" y="26" width="6" height="7" rx="3" fill="#101018"/>
+  <rect x="8"  y="25" width="21" height="21" rx="7" fill="#0000ff"/>
+  <rect x="35" y="25" width="21" height="21" rx="7" fill="#0000ff"/>
+  <rect x="12" y="29" width="6" height="3" rx="1.5" fill="#ffffff" opacity="0.6"/>
+</svg>
