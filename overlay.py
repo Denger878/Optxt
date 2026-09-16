@@ -36,11 +36,10 @@ POSE_LINE = (225, 225, 220)
 HAND_LINE = (28, 41, 218)          # the accent red
 
 SERIF = "/System/Library/Fonts/Supplemental/Georgia.ttf"
-SERIF_ITALIC = "/System/Library/Fonts/Supplemental/Georgia Italic.ttf"
 MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
 MONO_BOLD = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
 
-_FACES = {"serif": SERIF, "italic": SERIF_ITALIC, "mono": MONO, "mono_bold": MONO_BOLD}
+_FACES = {"serif": SERIF, "mono": MONO, "mono_bold": MONO_BOLD}
 _font_cache = {}
 
 
@@ -126,7 +125,7 @@ def _card(draw, box, radius, opacity=238):
 
 
 def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
-             fps, transcript, muted=False):
+             transcript, muted=False):
     """
     Two cards: the current reading, and a running transcript of what was said.
 
@@ -148,51 +147,43 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     draw = ImageDraw.Draw(layer)
 
     # ── reading card ───────────────────────────────────────────────
-    pad = sz(20)
-    px, py = sz(24), sz(24)
-    pw = min(sz(320), int(w * 0.52))
+    # Just the two readings. No wordmark, no FPS counter - the app only needs
+    # to answer "what is this person doing", and anything else is noise the
+    # viewer has to look past.
+    pad = sz(13)
+    px, py = sz(20), sz(20)
+    pw = min(sz(206), int(w * 0.40))
     inner = pw - pad * 2
     x = px + pad
 
-    wordmark_f = _font(sz(23), "italic")
-    micro_f = _font(sz(10), "mono")
-    value_f = _font(sz(29), "serif")
-    meta_f = _font(sz(11), "mono")
+    micro_f = _font(sz(8), "mono")
+    value_f = _font(sz(20), "serif")
+    meta_f = _font(sz(9), "mono")
 
     rows = [("GESTURE", gesture, gesture_conf), ("EMOTION", emotion, emotion_conf)]
-    row_h = sz(14) + sz(44) + sz(14)
-    ph = pad + sz(30) + sz(16) + row_h * len(rows) + pad - sz(6)
+    row_h = sz(10) + sz(30) + sz(10)
+    ph = pad * 2 + row_h * len(rows) - sz(8)
 
-    _card(draw, [px, py, px + pw, py + ph], sz(12))
-
-    y = py + pad - sz(4)
-    draw.text((x, y), "Optxt", font=wordmark_f, fill=INK + (255,))
-
-    fps_text = f"{fps:.0f} fps"
-    draw.text((px + pw - pad - draw.textlength(fps_text, font=meta_f), y + sz(10)),
-              fps_text, font=meta_f, fill=INK_LIGHT + (255,))
-
-    y += sz(32)
-    draw.line([x, y, x + inner, y], fill=BORDER + (255,), width=1)
-    y += sz(14)
+    _card(draw, [px, py, px + pw, py + ph], sz(9))
 
     placeholder = {"no_data", "no_model", "unsure", "no_face"}
+    y = py + pad
 
     for title, label, conf in rows:
         text = str(label).replace("_", " ")
         strong = label not in placeholder
         colour = INK if strong else INK_LIGHT
 
-        _tracked(draw, (x, y), title, micro_f, INK_LIGHT + (255,), sz(1.4))
+        _tracked(draw, (x, y), title, micro_f, INK_LIGHT + (255,), sz(1.1))
 
         pct = f"{conf * 100:.0f}%"
         draw.text((px + pw - pad - draw.textlength(pct, font=meta_f), y - sz(1)),
                   pct, font=meta_f, fill=INK_LIGHT + (255,))
 
-        draw.text((x, y + sz(13)), text, font=value_f, fill=colour + (255,))
+        draw.text((x, y + sz(9)), text, font=value_f, fill=colour + (255,))
 
-        bar_y = y + sz(13) + sz(46)
-        bar_h = sz(3)
+        bar_y = y + sz(9) + sz(31)
+        bar_h = max(2, sz(2))
         draw.rounded_rectangle([x, bar_y, x + inner, bar_y + bar_h],
                                radius=bar_h // 2, fill=BORDER + (255,))
         filled = int(inner * max(0.0, min(1.0, conf)))
@@ -203,20 +194,20 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
         y += row_h
 
     # ── transcript card ────────────────────────────────────────────
-    line_f = _font(sz(13), "mono")
-    time_f = _font(sz(13), "mono_bold")
+    line_f = _font(sz(10), "mono")
+    time_f = _font(sz(10), "mono_bold")
     lines = list(transcript)[-3:]
-    line_h = sz(19)
+    line_h = sz(14)
 
-    tpad = sz(16)
-    th = tpad + sz(14) + sz(8) + line_h * max(len(lines), 1) + tpad - sz(6)
-    tx0, tx1 = sz(24), w - sz(24)
-    ty0 = h - sz(24) - th
+    tpad = sz(11)
+    th = tpad + sz(10) + sz(6) + line_h * max(len(lines), 1) + tpad - sz(4)
+    tx0, tx1 = sz(20), w - sz(20)
+    ty0 = h - sz(20) - th
 
-    _card(draw, [tx0, ty0, tx1, ty0 + th], sz(12))
+    _card(draw, [tx0, ty0, tx1, ty0 + th], sz(9))
 
     ty = ty0 + tpad - sz(2)
-    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, INK_LIGHT + (255,), sz(1.4))
+    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, INK_LIGHT + (255,), sz(1.1))
 
     hint = "Q quit   M mute   S wireframe"
     if muted:
@@ -224,9 +215,9 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     draw.text((tx1 - tpad - draw.textlength(hint, font=micro_f), ty),
               hint, font=micro_f, fill=INK_LIGHT + (255,))
 
-    ty += sz(18)
+    ty += sz(13)
     draw.line([tx0 + tpad, ty, tx1 - tpad, ty], fill=BORDER + (255,), width=1)
-    ty += sz(8)
+    ty += sz(6)
 
     if not lines:
         draw.text((tx0 + tpad, ty), "listening...", font=line_f,

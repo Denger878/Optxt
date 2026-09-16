@@ -10,14 +10,14 @@ from landmarks import extract_landmarks
 from features import extract
 from overlay import draw_skeleton
 
-GESTURES = ["thumbsup", "thumbsdown", "pointingatyou", "middlefinger",
+GESTURES = ["thumbsup", "thumbsdown", "pointing", "middlefinger",
             "waving", "neutral"]
 EMOTIONS = ["shocked", "angry", "happy", "sad", "neutral"]
 
 GESTURE_HELP = {
     "thumbsup": "Fist with thumb pointing UP",
     "thumbsdown": "Fist with thumb pointing DOWN",
-    "pointingatyou": "Point index finger at the camera",
+    "pointing": "Point index finger at the camera",
     "middlefinger": "Middle finger up",
     "waving": "Open palm up at head height, fingers SPREAD WIDE - hold it",
     "neutral": "Sit still, hands DOWN in your lap, shoulders RELAXED and low",

@@ -33,7 +33,6 @@ def main():
 
     last_announcement_time = 0.0
     show_skeleton = True
-    frame_times = deque(maxlen=30)
 
     # Everything the app has said this session, stamped from launch. The HUD
     # shows the tail of it as a transcript.
@@ -41,8 +40,6 @@ def main():
     transcript = deque(maxlen=12)
 
     while True:
-        loop_start = time.time()
-
         ret, frame = cap.read()
         if not ret:
             print("❌ Failed to read frame")
@@ -77,14 +74,10 @@ def main():
         if show_skeleton:
             display_frame = draw_skeleton(display_frame, landmarks, raw)
 
-        frame_times.append(time.time() - loop_start)
-        fps = len(frame_times) / sum(frame_times) if sum(frame_times) > 0 else 0.0
-
         display_frame = draw_hud(
             display_frame,
             gesture, gesture_conf,
             emotion, emotion_conf,
-            fps,
             transcript,
             muted=is_muted(),
         )

@@ -78,7 +78,7 @@ class StateTracker:
         return {
             "thumbsup": "giving a thumbs up",
             "thumbsdown": "giving a thumbs down",
-            "pointingatyou": "pointing at you",
+            "pointing": "pointing at you",
             "middlefinger": "making a rude gesture",
             "waving": "waving at you",
             "neutral": "standing neutrally",
