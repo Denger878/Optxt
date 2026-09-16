@@ -19,19 +19,17 @@ mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 
 # ---- palette (RGB)
-TEXT = (226, 238, 241)
-DIM = (124, 148, 156)
-ACCENT = (94, 206, 226)
-WARN = (255, 176, 74)
-PLATE = (0, 0, 0)
+# Three colours only. White carries every piece of text - secondary text is the
+# same white at lower opacity rather than a grey, so nothing is a near-miss of
+# anything else. Pure blue carries every structural element. Amber appears for
+# one thing, muting, and is deliberately nothing like either.
+WHITE = (255, 255, 255)
+BLUE = (0, 0, 255)
+AMBER = (255, 170, 40)
 
 # ---- wireframe colours (BGR; these go through OpenCV)
-FACE_LINE = (168, 150, 66)
-FACE_NODE = (226, 212, 140)
-POSE_LINE = (188, 168, 74)
-POSE_NODE = (236, 224, 158)
-HAND_LINE = (74, 176, 255)
-HAND_NODE = (150, 214, 255)
+WIRE_LINE = (255, 0, 0)            # the same pure blue
+WIRE_NODE = (255, 255, 255)        # white, so vertices read against the lines
 
 MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
 MONO_BOLD = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
@@ -96,7 +94,8 @@ def draw_skeleton(frame, landmarks, raw):
     h, w = frame.shape[:2]
     face_results, pose_results, hand_results = raw
     layer = np.zeros_like(frame)
-    r = max(1, int(round(h / 480.0)))
+    r = max(2, int(round(h / 480.0)) + 1)
+    t = max(2, int(round(h / 640.0)) + 1)
 
     if face_results.multi_face_landmarks:
         lms = face_results.multi_face_landmarks[0].landmark
@@ -104,16 +103,16 @@ def draw_skeleton(frame, landmarks, raw):
             cv2.line(layer,
                      (int(lms[a].x * w), int(lms[a].y * h)),
                      (int(lms[b].x * w), int(lms[b].y * h)),
-                     FACE_LINE, 1)
+                     WIRE_LINE, t)
         for i in _FACE_NODES:
-            _node(layer, (int(lms[i].x * w), int(lms[i].y * h)), FACE_NODE, r)
+            _node(layer, (int(lms[i].x * w), int(lms[i].y * h)), WIRE_NODE, r)
 
     if landmarks and 'pose' in landmarks:
         pose = landmarks['pose']
         for a, b in POSE_BONES:
-            cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h), POSE_LINE, 1)
+            cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h), WIRE_LINE, t)
         for key in pose:
-            _node(layer, _px(pose[key], w, h), POSE_NODE, r + 1)
+            _node(layer, _px(pose[key], w, h), WIRE_NODE, r + 1)
 
     if hand_results.multi_hand_landmarks:
         for hand in hand_results.multi_hand_landmarks:
@@ -122,31 +121,23 @@ def draw_skeleton(frame, landmarks, raw):
                 cv2.line(layer,
                          (int(lms[a].x * w), int(lms[a].y * h)),
                          (int(lms[b].x * w), int(lms[b].y * h)),
-                         HAND_LINE, 1)
+                         WIRE_LINE, t)
             for lm in lms:
-                _node(layer, (int(lm.x * w), int(lm.y * h)), HAND_NODE, r)
+                _node(layer, (int(lm.x * w), int(lm.y * h)), WIRE_NODE, r)
 
     return cv2.addWeighted(frame, 1.0, layer, 0.85, 0)
 
 
-def _plate(draw, box, accent=ACCENT, opacity=178, ticks=True):
+def _plate(draw, box, opacity=178, width=2):
     """
-    Black translucent plate: square corners, a hairline frame, corner ticks.
+    Black translucent plate with a single uniform border.
 
-    Rounded corners and soft fills were the thing that read as 'website'. Square
-    corners with brackets read as an instrument.
+    No corner brackets - they framed the panel like a photo instead of reading
+    as part of one instrument. The border is 2px because a hairline disappears
+    against a moving video feed.
     """
-    x0, y0, x1, y1 = box
-    draw.rectangle(box, fill=PLATE + (opacity,))
-    draw.rectangle(box, outline=accent + (70,), width=1)
-
-    if not ticks:
-        return
-    t = max(4, int((x1 - x0) * 0.035))
-    for cx, cy, dx, dy in ((x0, y0, 1, 1), (x1, y0, -1, 1),
-                           (x0, y1, 1, -1), (x1, y1, -1, -1)):
-        draw.line([cx, cy, cx + t * dx, cy], fill=accent + (210,), width=1)
-        draw.line([cx, cy, cx, cy + t * dy], fill=accent + (210,), width=1)
+    draw.rectangle(box, fill=(0, 0, 0, opacity))
+    draw.rectangle(box, outline=BLUE + (255,), width=width)
 
 
 def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
@@ -172,15 +163,23 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     draw = ImageDraw.Draw(layer)
 
     # ── reading plate ──────────────────────────────────────────────
+    # Secondary text is white at reduced opacity, not a grey - same colour,
+    # less of it.
+    STRONG = WHITE + (255,)
+    SOFT = WHITE + (150,)
+    RULE = BLUE + (255,)
+
     pad = sz(13)
     px, py = sz(20), sz(20)
     pw = min(sz(214), int(w * 0.42))
     inner = pw - pad * 2
     x = px + pad
 
-    micro_f = _font(sz(8), "mono")
+    # Every small label is bold. At these sizes the regular weight rendered as
+    # a grey haze against moving video.
+    micro_f = _font(sz(9), "bold")
     value_f = _font(sz(18), "bold")
-    meta_f = _font(sz(9), "mono")
+    meta_f = _font(sz(10), "bold")
 
     rows = [("GESTURE", gesture, gesture_conf), ("EMOTION", emotion, emotion_conf)]
     row_h = sz(10) + sz(28) + sz(10)
@@ -194,78 +193,80 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     for title, label, conf in rows:
         text = str(label).replace("_", " ").upper()
         strong = label not in placeholder
-        colour = TEXT if strong else DIM
 
-        _tracked(draw, (x, y), title, micro_f, DIM + (255,), sz(1.1))
+        _tracked(draw, (x, y), title, micro_f, SOFT, sz(1.1))
 
         pct = f"{conf * 100:.0f}%"
         draw.text((px + pw - pad - draw.textlength(pct, font=meta_f), y - sz(1)),
-                  pct, font=meta_f, fill=DIM + (255,))
+                  pct, font=meta_f, fill=SOFT)
 
-        draw.text((x, y + sz(9)), text, font=value_f, fill=colour + (255,))
+        draw.text((x, y + sz(9)), text, font=value_f,
+                  fill=STRONG if strong else SOFT)
 
         # Segmented meter - discrete cells rather than a continuous bar, so the
         # confidence reads as a quantity being counted, not a progress bar.
+        # Unlit cells are a dark version of the same blue; as translucent white
+        # they tinted with whatever was behind the frame.
         bar_y = y + sz(9) + sz(28)
-        bar_h = max(3, sz(4))
+        bar_h = max(4, sz(5))
         cells = 20
-        gap = max(1, sz(1))
-        cw = (inner - gap * (cells - 1)) / cells
+        gap = max(2, sz(2))
         lit = int(round(cells * max(0.0, min(1.0, conf))))
         for c in range(cells):
-            cx0 = x + c * (cw + gap)
-            on = c < lit
-            draw.rectangle([cx0, bar_y, cx0 + cw, bar_y + bar_h],
-                           fill=((ACCENT if strong else DIM) + (235,)) if on
-                           else (46, 56, 60, 232))
+            # Snap both edges to whole pixels, or the gaps come out ragged.
+            cx0 = x + round(c * (inner + gap) / cells)
+            cx1 = x + round((c + 1) * (inner + gap) / cells) - gap
+            if c < lit:
+                fill = BLUE + (255,) if strong else SOFT
+            else:
+                fill = (0, 0, 86, 240)
+            draw.rectangle([cx0, bar_y, cx1, bar_y + bar_h], fill=fill)
         y += row_h
 
     # ── transcript plate ───────────────────────────────────────────
-    line_f = _font(sz(10), "mono")
-    time_f = _font(sz(10), "bold")
+    line_f = _font(sz(11), "bold")
+    time_f = _font(sz(11), "bold")
     lines = list(transcript)[-3:]
-    line_h = sz(14)
+    line_h = sz(15)
 
     tpad = sz(11)
-    th = tpad + sz(10) + sz(6) + line_h * max(len(lines), 1) + tpad - sz(4)
+    th = tpad + sz(11) + sz(7) + line_h * max(len(lines), 1) + tpad - sz(4)
     tx0, tx1 = sz(20), w - sz(20)
     ty0 = h - sz(20) - th
 
     _plate(draw, [tx0, ty0, tx1, ty0 + th])
 
     ty = ty0 + tpad - sz(2)
-    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, DIM + (255,), sz(1.1))
+    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, SOFT, sz(1.1))
 
     hint = "Q QUIT   M MUTE   S WIRE"
-    hint_col = DIM
+    hint_col = SOFT
     if muted:
         hint = "// MUTED //   " + hint
-        hint_col = WARN
+        hint_col = AMBER + (255,)
     draw.text((tx1 - tpad - draw.textlength(hint, font=micro_f), ty),
-              hint, font=micro_f, fill=hint_col + (255,))
+              hint, font=micro_f, fill=hint_col)
 
-    ty += sz(13)
-    draw.line([tx0 + tpad, ty, tx1 - tpad, ty], fill=ACCENT + (60,), width=1)
-    ty += sz(6)
+    ty += sz(14)
+    draw.line([tx0 + tpad, ty, tx1 - tpad, ty], fill=RULE, width=max(2, sz(2)))
+    ty += sz(7)
 
     if not lines:
-        draw.text((tx0 + tpad, ty), "> awaiting signal", font=line_f,
-                  fill=DIM + (255,))
+        draw.text((tx0 + tpad, ty), "> AWAITING SIGNAL", font=line_f, fill=SOFT)
     else:
         # Older lines fade back so the newest reads first.
         for i, (elapsed, sentence) in enumerate(lines):
             newest = i == len(lines) - 1
-            colour = TEXT if newest else DIM
             stamp = f"{int(elapsed) // 60:02d}:{int(elapsed) % 60:02d}"
             draw.text((tx0 + tpad, ty), stamp, font=time_f,
-                      fill=(ACCENT if newest else DIM) + (255,))
+                      fill=STRONG if newest else SOFT)
             offset = draw.textlength("00:00  ", font=time_f)
             avail = (tx1 - tpad) - (tx0 + tpad + offset)
             text = sentence
             while draw.textlength(text, font=line_f) > avail and len(text) > 4:
                 text = text[:-2]
             draw.text((tx0 + tpad + offset, ty), text, font=line_f,
-                      fill=colour + (255,))
+                      fill=STRONG if newest else SOFT)
             ty += line_h
 
     rgba = np.array(layer)
