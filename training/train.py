@@ -16,12 +16,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from features import extract, FEATURE_NAMES
 
 
-# Labels kept on disk but left out of training. Shrug was retired: held at a
-# realistic intensity it is nearly identical to neutral in a single frame, and
-# it dominated the error rate while every hand gesture sat at 97-99%.
-EXCLUDED_LABELS = {"shrug"}
-
-
 def load_data(data_type="gesture"):
     """
     Load every recording and turn it into features.
@@ -43,8 +37,6 @@ def load_data(data_type="gesture"):
     for filename in files:
         # "thumbsup_1768124724.json" -> label "thumbsup", recording id = filename
         label = filename.split('_')[0]
-        if label in EXCLUDED_LABELS:
-            continue
 
         with open(os.path.join(data_dir, filename), 'r') as f:
             frames = json.load(f)
