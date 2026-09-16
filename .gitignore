@@ -21,3 +21,7 @@ audio_cache/
 
 # Local data backups
 training/data_backup_*/
+
+# Node dev deps (only needed to run web/verify_pipeline.mjs)
+node_modules/
+package-lock.json

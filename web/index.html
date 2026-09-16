@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Optxt</title>
+<meta name="description" content="Reads gestures and expressions from a webcam and says them out loud.">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root { --blue: #0000ff; --red: #ff0000; --ink: #fff; }
+  html, body { height: 100%; background: #000; color: #fff;
+               font-family: "Courier New", ui-monospace, monospace; overflow: hidden; }
+  #stage { position: fixed; inset: 0; display: grid; place-items: center; }
+  #wrap { position: relative; width: 100%; height: 100%; }
+  video { position: absolute; inset: 0; width: 100%; height: 100%;
+          object-fit: cover; transform: scaleX(-1); }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  #gate { position: fixed; inset: 0; display: grid; place-items: center;
+          background: #000; z-index: 10; padding: 24px; text-align: center; }
+  #gate .box { max-width: 460px; border: 2px solid var(--blue);
+               background: rgba(0,0,0,.85); padding: 28px 26px; }
+  #gate h1 { font-size: 20px; letter-spacing: 2px; margin-bottom: 14px; }
+  #gate p { font-size: 13px; line-height: 1.7; color: #b8b8c0; margin-bottom: 18px; }
+  #gate button { font: inherit; font-size: 14px; letter-spacing: 1px;
+                 padding: 12px 26px; background: transparent; color: #fff;
+                 border: 2px solid var(--red); cursor: pointer; }
+  #gate button:hover { background: rgba(255,0,0,.12); }
+  #gate button:disabled { opacity: .45; cursor: default; }
+  #err { color: #ffaa28; font-size: 12px; margin-top: 14px; min-height: 1em; }
+</style>
+</head>
+<body>
+  <div id="stage"><div id="wrap">
+    <video id="video" playsinline muted></video>
+    <canvas id="overlay"></canvas>
+  </div></div>
+
+  <div id="gate">
+    <div class="box">
+      <h1>OPTXT</h1>
+      <p>Reads another person's gestures and expressions from your camera and
+         says them out loud. Everything runs in this browser — no video, no
+         landmarks and no audio ever leave your device.</p>
+      <button id="start" disabled>LOADING MODELS…</button>
+      <div id="err"></div>
+    </div>
+  </div>
+
+  <!-- Classic script: executes before the deferred module below, so `ort` is
+       defined by the time app.js runs. -->
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

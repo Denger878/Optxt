@@ -219,18 +219,25 @@ python training/train.py       # choose G / E / B
 
 Requires macOS camera permission for the launching terminal.
 
-## Future direction
+## Web build
 
-Max wants to deploy this to the web on Vercel. **Vercel cannot run this as-is** —
-it's a Python OpenCV desktop app, and Vercel's Python functions are short-lived
-with no camera. Realistic paths:
+`web/` is a fully client-side port, deployable to Vercel as static files. There
+is no backend: MediaPipe runs in WebAssembly, and the classifiers were exported
+to ONNX and run in the page with onnxruntime-web. Putting a server in the loop
+would add a network round trip to every frame of a 30fps loop and would break
+the offline property an accessibility tool needs.
 
-1. MediaPipe **JavaScript** in the browser captures landmarks, posts them to a
-   Python function wrapping `predict.py`. The landmark dict format is already
-   identical to what MediaPipe's JS build produces.
-2. Convert the models to **ONNX** and run inference client-side — no backend,
-   no latency, and it keeps the offline property.
+The port duplicates three Python modules in JavaScript — `landmarks.py`,
+`features.py`, `state_tracker.py` — which is a real risk: a silent numerical
+drift means the web build disagrees with the models it is running. Three
+verification scripts exist for exactly that, and all currently pass:
 
-`predict.py` exists as the seam for either: it takes landmarks and returns JSON,
-and imports neither cv2 nor mediapipe. The HUD already scales off frame
-dimensions, so it survives arbitrary resolutions and aspect ratios.
+- `training/verify_onnx.py` — ONNX vs scikit-learn (100% label agreement,
+  probabilities within 3e-7)
+- `training/verify_features_js.py` — `features.js` vs `features.py` (max
+  difference 5.6e-17)
+- `web/verify_pipeline.mjs` + `training/verify_pipeline.py` — end to end
+  (**2150/2150 frames identical**)
+
+Run all three after changing any model, feature or landmark index. See
+`web/README.md`.
