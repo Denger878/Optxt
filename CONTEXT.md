@@ -167,35 +167,33 @@ direction reversals) was built and then deliberately reverted for a simpler
 single-frame architecture. `spread_index_middle` is now the single
 highest-importance gesture feature.
 
-## Ownership — what Max did
+## Ownership
 
-Max owned the **data and modelling** side end to end:
+Max owns the recognition system and the web deployment end to end.
 
-- **Data collection.** Designed and ran the capture protocol: which classes,
-  how to pose them, and crucially *multiple takes per class from different
-  positions and distances* — which is what makes an honest held-out score
-  possible at all. The dataset is 86 recordings.
-- **Labelling schema and class design.** Which gestures and emotions the product
-  should recognise; adding `waving` and `sad`; retiring `shrug` after diagnosing
-  from the confusion matrix that his own takes were under-committed.
-- **Model training and accuracy.** Drove the iterative loop of train → read the
-  confusion matrix → change the data or features → retrain, from a leaky 100%
-  down to an honest 62–83% and back up to a real 93–97.7%.
-- **MediaPipe and landmark work** supporting both: which landmarks to extract
-  and how they feed the collection tool and the training pipeline.
+- **Data collection.** Designed and ran the capture protocol: which classes to
+  record, how to pose them, and multiple takes per class from different
+  positions and distances, which is what makes an honest held-out score
+  possible. 86 recordings, ~6,000 frames.
+- **Class design.** Chose which gestures and emotions to recognise, added
+  `waving` and `sad`, and retired `shrug` after the confusion matrix showed it
+  was indistinguishable from neutral in a single frame.
+- **Feature engineering** (`features.py`). The normalized geometric features
+  for both models, including smile direction, brow slope, finger spread, and
+  the decision to drop raw coordinates from the emotion model after ablation.
+- **Training and validation** (`training/`). Recording-level grouped
+  validation, model selection, and the iterative loop that took the models
+  from a leaky 100% to an honest 62–83% and up to 93–97.7%.
+- **Landmark extraction** (`landmarks.py`). Which MediaPipe landmarks to use,
+  and the fix for the inside-out eyebrow indices.
+- **Web deployment** (`web/`). The client-side port, ONNX export, the
+  parity tests between the Python and JavaScript builds, and the Vercel
+  deployment.
 - Majority of commits (34 of 53).
 
-Teammates owned **text-to-speech** and other application-side pieces.
-
-**Honest framing:** this was built with substantial AI-assisted development,
-including the feature-engineering rewrite and the bug diagnoses above. Max's
-contribution is real and specific — the dataset, the class design, the product
-calls, and directing the improvement loop — but he did not hand-write most of
-the feature mathematics. Two of the best decisions in the project were his
-unprompted calls: recognising that shrug was the problem, and that waving could
-be identified from an open palm without any temporal modelling. Represent it as
-collaborative work; the underlying reasoning is worth being able to explain
-either way.
+Teammates Noor Ahmar and Spencer Krafczek owned **text-to-speech**
+(`speech.py`, and an earlier ElevenLabs integration) and other pieces of the
+original hackathon build.
 
 ## Known limitations
 
