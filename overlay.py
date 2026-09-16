@@ -5,45 +5,48 @@ Drawing layer for the live view.
 Kept separate from main.py so the app loop stays readable, and separate from
 landmarks.py so nothing about how it looks can affect what the models see.
 
-The look is editorial rather than sci-fi: warm off-white cards, hairline rules,
-a serif for the readings and a monospace for the running transcript. Georgia and
-Courier New stand in for Crimson Text and Courier Prime - the same fallbacks the
-web version declares, and the only ones guaranteed to exist locally.
-
-Text is rendered with Pillow. OpenCV's putText only has the Hershey vector
-fonts, which are single-weight and badly spaced.
+The look is instrument panel rather than print: black translucent plates, a
+monospace face throughout, square corners and hard 1px rules. Nothing is
+anti-aliased except the text - the slight aliasing on the wireframe is what
+keeps it reading as a readout instead of an illustration.
 """
 import cv2
 import numpy as np
 import mediapipe as mp
 from PIL import Image, ImageDraw, ImageFont
 
-mp_drawing = mp.solutions.drawing_utils
 mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 
 # ---- palette (RGB)
-OFF_WHITE = (247, 246, 243)
-INK = (26, 26, 26)
-INK_BODY = (46, 46, 46)
-INK_LIGHT = (102, 102, 102)
-BORDER = (226, 221, 216)
-RED = (218, 41, 28)
+TEXT = (226, 238, 241)
+DIM = (124, 148, 156)
+ACCENT = (94, 206, 226)
+WARN = (255, 176, 74)
+PLATE = (0, 0, 0)
 
-# ---- skeleton colours (BGR; these go through OpenCV)
-MESH_LINE = (205, 205, 200)
-POSE_LINE = (225, 225, 220)
-HAND_LINE = (28, 41, 218)          # the accent red
+# ---- wireframe colours (BGR; these go through OpenCV)
+FACE_LINE = (168, 150, 66)
+FACE_NODE = (226, 212, 140)
+POSE_LINE = (188, 168, 74)
+POSE_NODE = (236, 224, 158)
+HAND_LINE = (74, 176, 255)
+HAND_NODE = (150, 214, 255)
 
-SERIF = "/System/Library/Fonts/Supplemental/Georgia.ttf"
 MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
 MONO_BOLD = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
 
-_FACES = {"serif": SERIF, "mono": MONO, "mono_bold": MONO_BOLD}
+_FACES = {"mono": MONO, "bold": MONO_BOLD}
 _font_cache = {}
 
+# Unique landmark indices touched by the contour set, so each vertex gets a node
+# drawn exactly once instead of once per edge.
+_FACE_EDGES = sorted(mp_face_mesh.FACEMESH_CONTOURS)
+_FACE_NODES = sorted({i for edge in _FACE_EDGES for i in edge})
+_HAND_EDGES = sorted(mp_hands.HAND_CONNECTIONS)
 
-def _font(size, face="serif"):
+
+def _font(size, face="mono"):
     key = (size, face)
     if key not in _font_cache:
         try:
@@ -73,61 +76,83 @@ def _px(point, w, h):
     return int(point[0] * w), int(point[1] * h)
 
 
+def _node(layer, centre, colour, r):
+    """Square vertex marker. Squares read as sampled points; circles read as decoration."""
+    x, y = centre
+    cv2.rectangle(layer, (x - r, y - r), (x + r, y + r), colour, -1)
+
+
 def draw_skeleton(frame, landmarks, raw):
     """
-    Draw a restrained wireframe: face contours, pose, hands.
+    Wireframe: hard lines with a visible node at every vertex.
 
-    Deliberately NOT the full face tesselation. That draws all 468 points and
-    every triangle between them, which covers the face like a mask and buries
-    the person underneath it. Contours trace the features that actually carry
-    expression - brows, eyes, lips, jawline - and leave the face visible.
+    Drawn without anti-aliasing and with square nodes on purpose. Smooth
+    contours look like a drawing of a face; stepped lines with marked vertices
+    look like something measuring one, which is what is actually happening.
+
+    Still contours only, not the full tesselation - that draws all 468 points
+    and every triangle between them, which covers the face like a mask.
     """
     h, w = frame.shape[:2]
     face_results, pose_results, hand_results = raw
     layer = np.zeros_like(frame)
+    r = max(1, int(round(h / 480.0)))
 
     if face_results.multi_face_landmarks:
-        mp_drawing.draw_landmarks(
-            image=layer,
-            landmark_list=face_results.multi_face_landmarks[0],
-            connections=mp_face_mesh.FACEMESH_CONTOURS,
-            landmark_drawing_spec=None,
-            connection_drawing_spec=mp_drawing.DrawingSpec(color=MESH_LINE, thickness=1),
-        )
+        lms = face_results.multi_face_landmarks[0].landmark
+        for a, b in _FACE_EDGES:
+            cv2.line(layer,
+                     (int(lms[a].x * w), int(lms[a].y * h)),
+                     (int(lms[b].x * w), int(lms[b].y * h)),
+                     FACE_LINE, 1)
+        for i in _FACE_NODES:
+            _node(layer, (int(lms[i].x * w), int(lms[i].y * h)), FACE_NODE, r)
 
     if landmarks and 'pose' in landmarks:
         pose = landmarks['pose']
         for a, b in POSE_BONES:
-            cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h),
-                     POSE_LINE, 1, cv2.LINE_AA)
+            cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h), POSE_LINE, 1)
         for key in pose:
-            cv2.circle(layer, _px(pose[key], w, h), 3, POSE_LINE, -1, cv2.LINE_AA)
+            _node(layer, _px(pose[key], w, h), POSE_NODE, r + 1)
 
     if hand_results.multi_hand_landmarks:
         for hand in hand_results.multi_hand_landmarks:
-            mp_drawing.draw_landmarks(
-                image=layer,
-                landmark_list=hand,
-                connections=mp_hands.HAND_CONNECTIONS,
-                landmark_drawing_spec=mp_drawing.DrawingSpec(
-                    color=HAND_LINE, thickness=1, circle_radius=2),
-                connection_drawing_spec=mp_drawing.DrawingSpec(
-                    color=HAND_LINE, thickness=1),
-            )
+            lms = hand.landmark
+            for a, b in _HAND_EDGES:
+                cv2.line(layer,
+                         (int(lms[a].x * w), int(lms[a].y * h)),
+                         (int(lms[b].x * w), int(lms[b].y * h)),
+                         HAND_LINE, 1)
+            for lm in lms:
+                _node(layer, (int(lm.x * w), int(lm.y * h)), HAND_NODE, r)
 
-    return cv2.addWeighted(frame, 1.0, layer, 0.5, 0)
+    return cv2.addWeighted(frame, 1.0, layer, 0.85, 0)
 
 
-def _card(draw, box, radius, opacity=238):
-    """Warm off-white card with a hairline border."""
-    draw.rounded_rectangle(box, radius=radius, fill=OFF_WHITE + (opacity,))
-    draw.rounded_rectangle(box, radius=radius, outline=BORDER + (255,), width=1)
+def _plate(draw, box, accent=ACCENT, opacity=178, ticks=True):
+    """
+    Black translucent plate: square corners, a hairline frame, corner ticks.
+
+    Rounded corners and soft fills were the thing that read as 'website'. Square
+    corners with brackets read as an instrument.
+    """
+    x0, y0, x1, y1 = box
+    draw.rectangle(box, fill=PLATE + (opacity,))
+    draw.rectangle(box, outline=accent + (70,), width=1)
+
+    if not ticks:
+        return
+    t = max(4, int((x1 - x0) * 0.035))
+    for cx, cy, dx, dy in ((x0, y0, 1, 1), (x1, y0, -1, 1),
+                           (x0, y1, 1, -1), (x1, y1, -1, -1)):
+        draw.line([cx, cy, cx + t * dx, cy], fill=accent + (210,), width=1)
+        draw.line([cx, cy, cx, cy + t * dy], fill=accent + (210,), width=1)
 
 
 def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
              transcript, muted=False):
     """
-    Two cards: the current reading, and a running transcript of what was said.
+    Two plates: the current reading, and a running transcript of what was said.
 
     `transcript` is a sequence of (elapsed_seconds, sentence), oldest first.
     The transcript exists because this tool narrates out loud - showing the same
@@ -146,56 +171,58 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
 
-    # ── reading card ───────────────────────────────────────────────
-    # Just the two readings. No wordmark, no FPS counter - the app only needs
-    # to answer "what is this person doing", and anything else is noise the
-    # viewer has to look past.
+    # ── reading plate ──────────────────────────────────────────────
     pad = sz(13)
     px, py = sz(20), sz(20)
-    pw = min(sz(206), int(w * 0.40))
+    pw = min(sz(214), int(w * 0.42))
     inner = pw - pad * 2
     x = px + pad
 
     micro_f = _font(sz(8), "mono")
-    value_f = _font(sz(20), "serif")
+    value_f = _font(sz(18), "bold")
     meta_f = _font(sz(9), "mono")
 
     rows = [("GESTURE", gesture, gesture_conf), ("EMOTION", emotion, emotion_conf)]
-    row_h = sz(10) + sz(30) + sz(10)
+    row_h = sz(10) + sz(28) + sz(10)
     ph = pad * 2 + row_h * len(rows) - sz(8)
 
-    _card(draw, [px, py, px + pw, py + ph], sz(9))
+    _plate(draw, [px, py, px + pw, py + ph])
 
     placeholder = {"no_data", "no_model", "unsure", "no_face"}
     y = py + pad
 
     for title, label, conf in rows:
-        text = str(label).replace("_", " ")
+        text = str(label).replace("_", " ").upper()
         strong = label not in placeholder
-        colour = INK if strong else INK_LIGHT
+        colour = TEXT if strong else DIM
 
-        _tracked(draw, (x, y), title, micro_f, INK_LIGHT + (255,), sz(1.1))
+        _tracked(draw, (x, y), title, micro_f, DIM + (255,), sz(1.1))
 
         pct = f"{conf * 100:.0f}%"
         draw.text((px + pw - pad - draw.textlength(pct, font=meta_f), y - sz(1)),
-                  pct, font=meta_f, fill=INK_LIGHT + (255,))
+                  pct, font=meta_f, fill=DIM + (255,))
 
         draw.text((x, y + sz(9)), text, font=value_f, fill=colour + (255,))
 
-        bar_y = y + sz(9) + sz(31)
-        bar_h = max(2, sz(2))
-        draw.rounded_rectangle([x, bar_y, x + inner, bar_y + bar_h],
-                               radius=bar_h // 2, fill=BORDER + (255,))
-        filled = int(inner * max(0.0, min(1.0, conf)))
-        if filled > bar_h:
-            draw.rounded_rectangle([x, bar_y, x + filled, bar_y + bar_h],
-                                   radius=bar_h // 2,
-                                   fill=(RED if strong else INK_LIGHT) + (255,))
+        # Segmented meter - discrete cells rather than a continuous bar, so the
+        # confidence reads as a quantity being counted, not a progress bar.
+        bar_y = y + sz(9) + sz(28)
+        bar_h = max(3, sz(4))
+        cells = 20
+        gap = max(1, sz(1))
+        cw = (inner - gap * (cells - 1)) / cells
+        lit = int(round(cells * max(0.0, min(1.0, conf))))
+        for c in range(cells):
+            cx0 = x + c * (cw + gap)
+            on = c < lit
+            draw.rectangle([cx0, bar_y, cx0 + cw, bar_y + bar_h],
+                           fill=((ACCENT if strong else DIM) + (235,)) if on
+                           else (46, 56, 60, 232))
         y += row_h
 
-    # ── transcript card ────────────────────────────────────────────
+    # ── transcript plate ───────────────────────────────────────────
     line_f = _font(sz(10), "mono")
-    time_f = _font(sz(10), "mono_bold")
+    time_f = _font(sz(10), "bold")
     lines = list(transcript)[-3:]
     line_h = sz(14)
 
@@ -204,32 +231,34 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     tx0, tx1 = sz(20), w - sz(20)
     ty0 = h - sz(20) - th
 
-    _card(draw, [tx0, ty0, tx1, ty0 + th], sz(9))
+    _plate(draw, [tx0, ty0, tx1, ty0 + th])
 
     ty = ty0 + tpad - sz(2)
-    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, INK_LIGHT + (255,), sz(1.1))
+    _tracked(draw, (tx0 + tpad, ty), "TRANSCRIPT", micro_f, DIM + (255,), sz(1.1))
 
-    hint = "Q quit   M mute   S wireframe"
+    hint = "Q QUIT   M MUTE   S WIRE"
+    hint_col = DIM
     if muted:
-        hint = "MUTED   " + hint
+        hint = "// MUTED //   " + hint
+        hint_col = WARN
     draw.text((tx1 - tpad - draw.textlength(hint, font=micro_f), ty),
-              hint, font=micro_f, fill=INK_LIGHT + (255,))
+              hint, font=micro_f, fill=hint_col + (255,))
 
     ty += sz(13)
-    draw.line([tx0 + tpad, ty, tx1 - tpad, ty], fill=BORDER + (255,), width=1)
+    draw.line([tx0 + tpad, ty, tx1 - tpad, ty], fill=ACCENT + (60,), width=1)
     ty += sz(6)
 
     if not lines:
-        draw.text((tx0 + tpad, ty), "listening...", font=line_f,
-                  fill=INK_LIGHT + (255,))
+        draw.text((tx0 + tpad, ty), "> awaiting signal", font=line_f,
+                  fill=DIM + (255,))
     else:
         # Older lines fade back so the newest reads first.
         for i, (elapsed, sentence) in enumerate(lines):
             newest = i == len(lines) - 1
-            colour = INK if newest else INK_LIGHT
+            colour = TEXT if newest else DIM
             stamp = f"{int(elapsed) // 60:02d}:{int(elapsed) % 60:02d}"
             draw.text((tx0 + tpad, ty), stamp, font=time_f,
-                      fill=(RED if newest else INK_LIGHT) + (255,))
+                      fill=(ACCENT if newest else DIM) + (255,))
             offset = draw.textlength("00:00  ", font=time_f)
             avail = (tx1 - tpad) - (tx0 + tpad + offset)
             text = sentence
