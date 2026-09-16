@@ -19,17 +19,20 @@ mp_face_mesh = mp.solutions.face_mesh
 mp_hands = mp.solutions.hands
 
 # ---- palette (RGB)
-# Three colours only. White carries every piece of text - secondary text is the
-# same white at lower opacity rather than a grey, so nothing is a near-miss of
-# anything else. Pure blue carries every structural element. Amber appears for
-# one thing, muting, and is deliberately nothing like either.
+# White carries everything inside a plate - text, rules, meters - with secondary
+# text the same white at lower opacity rather than a grey, so nothing is a
+# near-miss of anything else. Blue is only ever the plate outline. Amber appears
+# for one thing, muting.
 WHITE = (255, 255, 255)
 BLUE = (0, 0, 255)
 AMBER = (255, 170, 40)
 
 # ---- wireframe colours (BGR; these go through OpenCV)
-WIRE_LINE = (255, 0, 0)            # the same pure blue
-WIRE_NODE = (255, 255, 255)        # white, so vertices read against the lines
+# One colour per landmark group, kept to primaries so no two can be mistaken
+# for each other at a glance.
+FACE_WIRE = (255, 0, 0)            # blue
+POSE_WIRE = (0, 0, 255)            # red
+HAND_WIRE = (0, 255, 0)            # green
 
 MONO = "/System/Library/Fonts/Supplemental/Courier New.ttf"
 MONO_BOLD = "/System/Library/Fonts/Supplemental/Courier New Bold.ttf"
@@ -82,7 +85,8 @@ def _node(layer, centre, colour, r):
 
 def draw_skeleton(frame, landmarks, raw):
     """
-    Wireframe: hard lines with a visible node at every vertex.
+    Wireframe: hard lines with a visible node at every vertex, one primary
+    colour per group - face blue, body red, hands green.
 
     Drawn without anti-aliasing and with square nodes on purpose. Smooth
     contours look like a drawing of a face; stepped lines with marked vertices
@@ -103,16 +107,16 @@ def draw_skeleton(frame, landmarks, raw):
             cv2.line(layer,
                      (int(lms[a].x * w), int(lms[a].y * h)),
                      (int(lms[b].x * w), int(lms[b].y * h)),
-                     WIRE_LINE, t)
+                     FACE_WIRE, t)
         for i in _FACE_NODES:
-            _node(layer, (int(lms[i].x * w), int(lms[i].y * h)), WIRE_NODE, r)
+            _node(layer, (int(lms[i].x * w), int(lms[i].y * h)), FACE_WIRE, r)
 
     if landmarks and 'pose' in landmarks:
         pose = landmarks['pose']
         for a, b in POSE_BONES:
-            cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h), WIRE_LINE, t)
+            cv2.line(layer, _px(pose[a], w, h), _px(pose[b], w, h), POSE_WIRE, t)
         for key in pose:
-            _node(layer, _px(pose[key], w, h), WIRE_NODE, r + 1)
+            _node(layer, _px(pose[key], w, h), POSE_WIRE, r + 1)
 
     if hand_results.multi_hand_landmarks:
         for hand in hand_results.multi_hand_landmarks:
@@ -121,9 +125,9 @@ def draw_skeleton(frame, landmarks, raw):
                 cv2.line(layer,
                          (int(lms[a].x * w), int(lms[a].y * h)),
                          (int(lms[b].x * w), int(lms[b].y * h)),
-                         WIRE_LINE, t)
+                         HAND_WIRE, t)
             for lm in lms:
-                _node(layer, (int(lm.x * w), int(lm.y * h)), WIRE_NODE, r)
+                _node(layer, (int(lm.x * w), int(lm.y * h)), HAND_WIRE, r)
 
     return cv2.addWeighted(frame, 1.0, layer, 0.85, 0)
 
@@ -167,7 +171,7 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
     # less of it.
     STRONG = WHITE + (255,)
     SOFT = WHITE + (150,)
-    RULE = BLUE + (255,)
+    RULE = WHITE + (215,)
 
     pad = sz(13)
     px, py = sz(20), sz(20)
@@ -203,24 +207,15 @@ def draw_hud(frame, gesture, gesture_conf, emotion, emotion_conf,
         draw.text((x, y + sz(9)), text, font=value_f,
                   fill=STRONG if strong else SOFT)
 
-        # Segmented meter - discrete cells rather than a continuous bar, so the
-        # confidence reads as a quantity being counted, not a progress bar.
-        # Unlit cells are a dark version of the same blue; as translucent white
-        # they tinted with whatever was behind the frame.
+        # One continuous bar. The track is a solid dark rather than translucent
+        # white, which would tint with whatever was behind the frame.
         bar_y = y + sz(9) + sz(28)
         bar_h = max(4, sz(5))
-        cells = 20
-        gap = max(2, sz(2))
-        lit = int(round(cells * max(0.0, min(1.0, conf))))
-        for c in range(cells):
-            # Snap both edges to whole pixels, or the gaps come out ragged.
-            cx0 = x + round(c * (inner + gap) / cells)
-            cx1 = x + round((c + 1) * (inner + gap) / cells) - gap
-            if c < lit:
-                fill = BLUE + (255,) if strong else SOFT
-            else:
-                fill = (0, 0, 86, 240)
-            draw.rectangle([cx0, bar_y, cx1, bar_y + bar_h], fill=fill)
+        draw.rectangle([x, bar_y, x + inner, bar_y + bar_h], fill=(38, 38, 42, 240))
+        filled = int(round(inner * max(0.0, min(1.0, conf))))
+        if filled > 0:
+            draw.rectangle([x, bar_y, x + filled, bar_y + bar_h],
+                           fill=STRONG if strong else SOFT)
         y += row_h
 
     # ── transcript plate ───────────────────────────────────────────
