@@ -1,114 +1,84 @@
 # speech.py
-import os
+"""
+Text-to-speech on a background thread.
+
+Speaking is blocking: pyttsx3's runAndWait() and `say` both hold the caller
+until the sentence finishes. Calling either from the capture loop froze the
+video for the length of every announcement, so speech runs on its own worker
+thread and the loop just drops a line on the queue.
+"""
 import platform
+import queue
 import subprocess
-from dotenv import load_dotenv
+import threading
 
-# Load environment variables
-load_dotenv()
+import pyttsx3
 
-# Setup caching directory
-CACHE_DIR = "audio_cache"
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
+_IS_MAC = platform.system() == "Darwin"
 
-# Try to initialize ElevenLabs
-USE_ELEVEN = False
 try:
-    from elevenlabs.client import ElevenLabs
-    from elevenlabs import save, VoiceSettings
-    
-    api_key = os.getenv("ELEVENLABS_API_KEY")
-    if api_key:
-        client = ElevenLabs(api_key=api_key)
-        USE_ELEVEN = True
-        print("✅ ElevenLabs TTS enabled")
-    else:
-        print("⚠️  ELEVENLABS_API_KEY not found in .env file")
-except ImportError:
-    print("⚠️  elevenlabs package not installed. Run: pip install elevenlabs")
-except Exception as e:
-    print(f"⚠️  ElevenLabs setup failed: {e}")
+    _engine = pyttsx3.init()
+    _USE_PYTTSX3 = True
+except Exception:
+    _engine = None
+    _USE_PYTTSX3 = False
+    print("⚠️  pyttsx3 failed, using system TTS")
 
-if not USE_ELEVEN:
-    print("   Using system TTS fallback (Mac 'say' command)")
+_queue = queue.Queue(maxsize=4)
+_muted = threading.Event()
 
-# Emotion-based voice settings
-EMOTION_SETTINGS = {
-    "happy": VoiceSettings(stability=0.4, similarity_boost=0.75, style=0.5),
-    "angry": VoiceSettings(stability=0.2, similarity_boost=0.8, style=0.9),
-    "shocked": VoiceSettings(stability=0.3, similarity_boost=0.8, style=0.7),
-    "neutral": VoiceSettings(stability=0.8, similarity_boost=0.75, style=0.0)
-}
 
-def say_interaction(text, emotion="neutral"):
-    """
-    Speak text with emotion-based voice settings.
-    Uses ElevenLabs if available, falls back to system TTS.
-    """
-    print(f"🔊 [{emotion}] {text}")
-    
-    # Check cache first
-    clean_text = text.replace(" ", "_").replace(",", "").replace(".", "").lower()[:50]
-    filepath = os.path.join(CACHE_DIR, f"{clean_text}_{emotion}.mp3")
-    
-    if os.path.exists(filepath):
-        # Play cached audio
-        play_local_audio(filepath)
-        return
-    
-    # Generate new audio
-    if USE_ELEVEN:
+def _speak_blocking(text):
+    if _USE_PYTTSX3:
         try:
-            # Generate audio with emotion settings
-            audio = client.text_to_speech.convert(
-                text=text,
-                voice_id="EXAVITQu4vr4xnSDxMaL",  # George voice (calm, clear)
-                model_id="eleven_flash_v2_5",  # Fast model
-                voice_settings=EMOTION_SETTINGS.get(emotion, EMOTION_SETTINGS["neutral"])
-            )
-            
-            # Save to cache
-            save(audio, filepath)
-            
-            # Play
-            play_local_audio(filepath)
-            
+            _engine.say(text)
+            _engine.runAndWait()
+            return
         except Exception as e:
-            print(f"ElevenLabs error: {e}")
-            fallback_tts(text)
-    else:
-        # Use system TTS
-        fallback_tts(text)
-
-def play_local_audio(path):
-    """Play cached audio files using system tools."""
-    if platform.system() == "Darwin":  # Mac
-        subprocess.run(["afplay", path], check=False)
-    elif platform.system() == "Windows":
-        # Windows Media Player
-        subprocess.run(["start", path], shell=True, check=False)
-    else:  # Linux
-        subprocess.run(["mpg123", path], check=False)
-
-def fallback_tts(text):
-    """System TTS fallback."""
-    if platform.system() == "Darwin":  # Mac
+            print(f"TTS error: {e}")
+    if _IS_MAC:
         subprocess.run(["say", text])
-    elif platform.system() == "Windows":
-        # Windows SAPI
-        import pyttsx3
-        engine = pyttsx3.init()
-        engine.say(text)
-        engine.runAndWait()
 
-# Test
+
+def _worker():
+    while True:
+        text = _queue.get()
+        if text is None:
+            break
+        _speak_blocking(text)
+        _queue.task_done()
+
+
+_thread = threading.Thread(target=_worker, daemon=True)
+_thread.start()
+
+
+def say_interaction(text):
+    """Queue a line to be spoken. Returns immediately."""
+    print(f"🔊 Optxt says: {text}")
+    if _muted.is_set():
+        return
+    try:
+        _queue.put_nowait(text)
+    except queue.Full:
+        # Speech is falling behind the detections; skip rather than build a
+        # backlog of announcements about things that already stopped happening.
+        pass
+
+
+def toggle_mute():
+    """Flip mute. Returns True if now muted."""
+    if _muted.is_set():
+        _muted.clear()
+        return False
+    _muted.set()
+    return True
+
+
+def is_muted():
+    return _muted.is_set()
+
+
 if __name__ == "__main__":
-    print("Testing TTS system...")
-    
-    say_interaction("Hello! Testing neutral voice.", emotion="neutral")
-    say_interaction("I'm so happy to see you!", emotion="happy")
-    say_interaction("I am very angry right now!", emotion="angry")
-    say_interaction("Oh my god, that's shocking!", emotion="shocked")
-    
-    print("\n✅ TTS test complete!")
+    say_interaction("Voice system is online.")
+    _queue.join()

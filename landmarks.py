@@ -29,10 +29,14 @@ hands_model = mp_hands.Hands(
     min_tracking_confidence=0.5,
 )
 
-def extract_landmarks(frame): 
+def extract_landmarks(frame, return_raw=False):
     """
     Takes a BGR frame from webcam.
     Returns dict with face, pose, and hand landmarks, or None if nothing detected.
+
+    With return_raw=True, also returns the untouched MediaPipe results as a
+    second value. The overlay uses those to draw the full 468-point face mesh;
+    the models only ever see the curated subset below.
     """
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     
@@ -56,10 +60,14 @@ def extract_landmarks(frame):
             'lower_lip': (face.landmark[14].x, face.landmark[14].y, face.landmark[14].z),
             
             # === EYEBROWS (detects surprised, angry) ===
-            'left_eyebrow_inner': (face.landmark[70].x, face.landmark[70].y, face.landmark[70].z),
-            'left_eyebrow_outer': (face.landmark[107].x, face.landmark[107].y, face.landmark[107].z),
-            'right_eyebrow_inner': (face.landmark[300].x, face.landmark[300].y, face.landmark[300].z),
-            'right_eyebrow_outer': (face.landmark[336].x, face.landmark[336].y, face.landmark[336].z),
+            # MediaPipe's brow chains run lateral -> medial, so 70/300 are the
+            # OUTER ends and 107/336 the inner ones. These were named the wrong
+            # way round, which made the brow-furrow feature measure face width
+            # instead of the furrow, and anger was never detected.
+            'left_eyebrow_outer': (face.landmark[70].x, face.landmark[70].y, face.landmark[70].z),
+            'left_eyebrow_inner': (face.landmark[107].x, face.landmark[107].y, face.landmark[107].z),
+            'right_eyebrow_outer': (face.landmark[300].x, face.landmark[300].y, face.landmark[300].z),
+            'right_eyebrow_inner': (face.landmark[336].x, face.landmark[336].y, face.landmark[336].z),
             
             # === EYES (detects shocked - wide open eyes) ===
             'left_eye_top': (face.landmark[159].x, face.landmark[159].y, face.landmark[159].z),
@@ -99,7 +107,11 @@ def extract_landmarks(frame):
             }
             landmarks['hands'].append(hand_data)
     
-    return landmarks if landmarks else None
+    landmarks = landmarks if landmarks else None
+
+    if return_raw:
+        return landmarks, (face_results, pose_results, hand_results)
+    return landmarks
 
 # Test it
 if __name__ == "__main__":

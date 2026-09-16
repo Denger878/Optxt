@@ -1,104 +1,102 @@
 # main.py
-import cv2 
 import time
+from collections import deque
+
+import cv2
 
 from landmarks import extract_landmarks
 from gestures import detect_gesture
 from emotions import detect_emotion
-from speech import say_interaction
+from speech import say_interaction, toggle_mute, is_muted
 from state_tracker import StateTracker
+from overlay import draw_skeleton, draw_hud
+
+ANNOUNCEMENT_COOLDOWN = 4.0   # seconds between spoken updates
+
 
 def main():
     print("=" * 50)
     print("OPTXT")
     print("=" * 50)
 
-    # Setup webcam
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         print("❌ Camera not found")
         return
-    
+
     print("✅ Webcam ready")
 
-    # State tracker (prevents repeating same info)
-    tracker = StateTracker()
+    tracker = StateTracker(stability=5)
 
-    print("🎬 Running... Press 'q' to quit")
+    print("🎬 Running... 'q' quit, 'm' mute, 's' toggle skeleton")
     print("=" * 50)
 
-    last_announcement_time = time.time()
-    announcement_cooldown = 4.0 
-    
+    last_announcement_time = 0.0
+    last_spoken = ""
+    show_skeleton = True
+    frame_times = deque(maxlen=30)
+
     while True:
+        loop_start = time.time()
+
         ret, frame = cap.read()
         if not ret:
             print("❌ Failed to read frame")
             break
 
-        # Extract landmarks from current frame
-        landmarks = extract_landmarks(frame)
-        
-        current_gesture = "no_data"
-        current_emotion = "no_data"
-        
+        # Mirror the view so moving right on screen matches moving right in life.
+        frame = cv2.flip(frame, 1)
+
+        landmarks, raw = extract_landmarks(frame, return_raw=True)
+
+        gesture, gesture_conf = "no_data", 0.0
+        emotion, emotion_conf = "no_data", 0.0
+
         if landmarks:
-            # Detect gesture and emotion
-            current_gesture = detect_gesture(landmarks)
-            current_emotion = detect_emotion(landmarks)
-            
-            # Check if anything changed
-            current_time = time.time()
-            if (current_time - last_announcement_time) >= announcement_cooldown:
-                changed, message = tracker.update(current_gesture, current_emotion)
-                
+            gesture, gesture_conf = detect_gesture(landmarks, with_confidence=True)
+            emotion, emotion_conf = detect_emotion(landmarks, with_confidence=True)
+
+            now = time.time()
+            if (now - last_announcement_time) >= ANNOUNCEMENT_COOLDOWN:
+                changed, message = tracker.update(gesture, emotion)
                 if changed:
                     print(f">>> {message}")
-                    say_interaction(message, emotion=current_emotion)
-                    last_announcement_time = current_time
-        
-        # Visual feedback
-        display_frame = frame.copy()
-        
-        # Draw current status
-        cv2.putText(
+                    say_interaction(message)
+                    last_spoken = message
+                    last_announcement_time = now
+            else:
+                # Keep feeding the stability window even during the cooldown,
+                # so the next eligible frame reflects a settled reading.
+                tracker.update(gesture, emotion)
+
+        display_frame = frame
+        if show_skeleton:
+            display_frame = draw_skeleton(display_frame, landmarks, raw)
+
+        frame_times.append(time.time() - loop_start)
+        fps = len(frame_times) / sum(frame_times) if sum(frame_times) > 0 else 0.0
+
+        display_frame = draw_hud(
             display_frame,
-            f"Gesture: {current_gesture}",
-            (10, 30),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0, 255, 0),
-            2
-        )
-        cv2.putText(
-            display_frame,
-            f"Emotion: {current_emotion}",
-            (10, 60),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (0, 255, 0),
-            2
-        )
-        
-        # Show FPS
-        cv2.putText(
-            display_frame,
-            "Press 'q' to quit",
-            (10, 90),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (255, 255, 255),
-            1
+            gesture, gesture_conf,
+            emotion, emotion_conf,
+            fps,
+            ("[muted] " if is_muted() else "") + last_spoken,
         )
 
         cv2.imshow("OPTXT", display_frame)
-                
-        # Press 'q' to quit
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q'):
             break
+        elif key == ord('m'):
+            print("🔇 Muted" if toggle_mute() else "🔊 Unmuted")
+        elif key == ord('s'):
+            show_skeleton = not show_skeleton
 
     cap.release()
     cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()

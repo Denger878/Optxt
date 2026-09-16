@@ -1,10 +1,15 @@
 # emotions.py
-import numpy as np
-import joblib
 import os
 
-# Load emotion model (do this once at startup)
+import numpy as np
+import joblib
+
+from features import emotion_features
+
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "training/models/emotion_model.pkl")
+
+# See gestures.py - same reasoning for refusing to guess out loud.
+CONFIDENCE_THRESHOLD = 0.55
 
 try:
     emotion_model = joblib.load(MODEL_PATH)
@@ -14,57 +19,36 @@ except FileNotFoundError:
     print("⚠️  Emotion model not found - train it first!")
     print(f"   Looking for: {MODEL_PATH}")
 
-def extract_emotion_features(landmarks):
-    """Convert face landmarks to features for emotion model."""
-    features = []
-    
-    if 'face' not in landmarks:
-        return None
-    
-    face = landmarks['face']
-    
-    # Flatten all face coordinates in sorted order (x, y only)
-    for key in sorted(face.keys()):
-        features.extend([face[key][0], face[key][1]])
-    
-    return features
 
-def detect_emotion(landmarks):
-    """Predict emotion from landmarks."""
+def detect_emotion(landmarks, with_confidence=False):
+    """
+    Predict an emotion from one frame of landmarks.
+
+    Returns the label, or (label, confidence) when with_confidence is set.
+    """
+    def result(label, conf):
+        return (label, conf) if with_confidence else label
+
     if emotion_model is None:
-        return "no_model"
-    
-    if landmarks is None:
-        return "no_data"
-    
-    features = extract_emotion_features(landmarks)
-    
-    if features is None:
-        return "no_face"
-    
-    # Reshape for model (expects 2D array)
-    features_array = np.array(features).reshape(1, -1)
-    
-    # Predict
-    prediction = emotion_model.predict(features_array)[0]
-    
-    return prediction
+        return result("no_model", 0.0)
 
-# Test
+    features = emotion_features(landmarks)
+    if features is None:
+        return result("no_face", 0.0)
+
+    features_array = np.array(features).reshape(1, -1)
+
+    probabilities = emotion_model.predict_proba(features_array)[0]
+    best = int(np.argmax(probabilities))
+    confidence = float(probabilities[best])
+    label = emotion_model.classes_[best]
+
+    if confidence < CONFIDENCE_THRESHOLD:
+        return result("unsure", confidence)
+
+    return result(label, confidence)
+
+
 if __name__ == "__main__":
     print("Testing emotion detection...")
     print(f"Model loaded: {emotion_model is not None}")
-    
-    # Dummy test
-    dummy_landmarks = {
-        'face': {
-            'mouth_left': (0.3, 0.6, 0.0),
-            'mouth_right': (0.7, 0.6, 0.0),
-            'nose_tip': (0.5, 0.5, 0.0),
-            'chin': (0.5, 0.8, 0.0),
-            'forehead': (0.5, 0.2, 0.0)
-        }
-    }
-    
-    result = detect_emotion(dummy_landmarks)
-    print(f"Test prediction: {result}")

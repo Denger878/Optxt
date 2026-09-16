@@ -13,3 +13,11 @@ venv/
 
 # OS
 .DS_Store
+# Secrets
+.env
+
+# Generated TTS audio
+audio_cache/
+
+# Local data backups
+training/data_backup_*/

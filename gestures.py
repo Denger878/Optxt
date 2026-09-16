@@ -1,10 +1,17 @@
 # gestures.py
-import numpy as np
-import joblib
 import os
 
-# Load gesture model
+import numpy as np
+import joblib
+
+from features import gesture_features
+
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "training/models/gesture_model.pkl")
+
+# Below this much confidence we say "unsure" rather than announce a guess.
+# The app speaks out loud to someone who can't check the screen, so a confident
+# wrong answer is worse than admitting uncertainty.
+CONFIDENCE_THRESHOLD = 0.55
 
 try:
     gesture_model = joblib.load(MODEL_PATH)
@@ -13,51 +20,36 @@ except FileNotFoundError:
     gesture_model = None
     print("⚠️  Gesture model not found - train it first!")
 
-def extract_gesture_features(landmarks):
-    """Convert landmarks to features (STATIC - NO MOTION)."""
-    features = []
-    
-    # Shoulder positions (for shrug)
-    if 'pose' in landmarks:
-        pose = landmarks['pose']
-        features.extend([pose['left_shoulder'][0], pose['left_shoulder'][1]])
-        features.extend([pose['right_shoulder'][0], pose['right_shoulder'][1]])
-        features.extend([pose['left_elbow'][0], pose['left_elbow'][1]])
-        features.extend([pose['right_elbow'][0], pose['right_elbow'][1]])
-    else:
-        features.extend([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
-    
-    # Hand positions (for thumbs, pointing, middle finger)
-    if 'hands' in landmarks and len(landmarks['hands']) > 0:
-        hand = landmarks['hands'][0]
-        features.extend([hand['wrist'][0], hand['wrist'][1]])
-        features.extend([hand['thumb_tip'][0], hand['thumb_tip'][1]])
-        features.extend([hand['index_tip'][0], hand['index_tip'][1]])
-        features.extend([hand['middle_tip'][0], hand['middle_tip'][1]])
-        features.extend([hand['ring_tip'][0], hand['ring_tip'][1]])
-        features.extend([hand['pinky_tip'][0], hand['pinky_tip'][1]])
-    else:
-        features.extend([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-    
-    return features
 
-def detect_gesture(landmarks):
-    """Predict gesture from landmarks (SINGLE FRAME)."""
+def detect_gesture(landmarks, with_confidence=False):
+    """
+    Predict a gesture from one frame of landmarks.
+
+    Returns the label, or (label, confidence) when with_confidence is set.
+    """
+    def result(label, conf):
+        return (label, conf) if with_confidence else label
+
     if gesture_model is None:
-        return "no_model"
-    
-    if landmarks is None:
-        return "no_data"
-    
-    features = extract_gesture_features(landmarks)
-    features_array = np.array(features).reshape(1, -1)
-    
-    # Predict
-    prediction = gesture_model.predict(features_array)[0]
-    
-    return prediction
+        return result("no_model", 0.0)
 
-# Test
+    features = gesture_features(landmarks)
+    if features is None:
+        return result("no_data", 0.0)
+
+    features_array = np.array(features).reshape(1, -1)
+
+    probabilities = gesture_model.predict_proba(features_array)[0]
+    best = int(np.argmax(probabilities))
+    confidence = float(probabilities[best])
+    label = gesture_model.classes_[best]
+
+    if confidence < CONFIDENCE_THRESHOLD:
+        return result("unsure", confidence)
+
+    return result(label, confidence)
+
+
 if __name__ == "__main__":
-    print("Testing gesture detection (static poses)...")
+    print("Testing gesture detection...")
     print(f"Model loaded: {gesture_model is not None}")
