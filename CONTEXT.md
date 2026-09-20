@@ -193,7 +193,8 @@ Max owns the recognition system and the web deployment end to end.
 
 Teammates Noor Ahmar and Spencer Krafczek owned **text-to-speech**
 (`speech.py`, and an earlier ElevenLabs integration) and other pieces of the
-original hackathon build.
+original hackathon build inlcuding setting up working environment and main.py that tied the whole project together
+
 
 ## Known limitations
 
